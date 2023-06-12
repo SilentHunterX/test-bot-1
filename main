@@ -1,0 +1,101 @@
+import telegram
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
+import requests
+from PIL import Image
+from io import BytesIO
+
+TOKEN = '5807326135:AAFRVfAIkGesD9FcHnVYkoroWeIjFdYoyk0'
+
+# Dictionary mapping type names to emojis and colors
+TYPE_INFO = {
+    "normal": {"emoji": "🟦", "color": "#95A5A6"},
+    "fighting": {"emoji": "🥊", "color": "#E74C3C"},
+    "flying": {"emoji": "🕊️", "color": "#85C1E9"},
+    "poison": {"emoji": "☠️", "color": "#9B59B6"},
+    "ground": {"emoji": "⛰️", "color": "#F4D03F"},
+    "rock": {"emoji": "🪨", "color": "#BB8FCE"},
+    "bug": {"emoji": "🐛", "color": "#76D7C4"},
+    "ghost": {"emoji": "👻", "color": "#34495E"},
+    "steel": {"emoji": "🔩", "color": "#D6DBDF"},
+    "fire": {"emoji": "🔥", "color": "#E67E22"},
+    "water": {"emoji": "💧", "color": "#3498DB"},
+    "grass": {"emoji": "🌿", "color": "#2ECC71"},
+    "electric": {"emoji": "⚡", "color": "#F1C40F"},
+    "psychic": {"emoji": "🔮", "color": "#AF7AC5"},
+    "ice": {"emoji": "❄️", "color": "#AED6F1"},
+    "dragon": {"emoji": "🐉", "color": "#7D3C98"},
+    "dark": {"emoji": "🌑", "color": "#212F3D"},
+    "fairy": {"emoji": "🧚", "color": "#FADBD8"}
+}
+
+def start(update, context):
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome to the Pokémon Weakness Bot! Send me the name of a Pokémon using '/weakness <pokemon_name>' to get its weaknesses.")
+
+def get_weaknesses(update, context):
+    pokemon_name = update.message.text.split(" ")[1].lower()
+    api_url = f"https://pokeapi.co/api/v2/pokemon/{pokemon_name}"
+    response = requests.get(api_url)
+
+    if response.status_code == 200:
+        data = response.json()
+        types = [t['type']['name'] for t in data['types']]
+        weaknesses = set()
+        for t in types:
+            response = requests.get(f"https://pokeapi.co/api/v2/type/{t}")
+            if response.status_code == 200:
+                type_data = response.json()
+                damage_relations = type_data['damage_relations']
+                for weakness in damage_relations['double_damage_from']:
+                    weakness_name = weakness['name'].capitalize()
+                    if weakness_name not in types and weakness_name not in weaknesses:
+                        weaknesses.add(weakness_name)
+                for resistance in damage_relations['half_damage_from']:
+                    resistance_name = resistance['name'].capitalize()
+                    if resistance_name in weaknesses:
+                        weaknesses.remove(resistance_name)
+                for immune in damage_relations['no_damage_from']:
+                    immune_name = immune['name'].capitalize()
+                    if immune_name in weaknesses:
+                        weaknesses.remove(immune_name)
+
+        if weaknesses:
+            image_url = data['sprites']['other']['official-artwork']['front_default']
+            image_data = requests.get(image_url).content
+            image = Image.open(BytesIO(image_data))
+            image.thumbnail((200, 200))  # Resize the image to a maximum size of 300x300
+            image_buffer = BytesIO()
+            image.save(image_buffer, format='PNG')
+            image_buffer.seek(0)
+            
+            weakness_message = f"<b>Weaknesses of {pokemon_name.capitalize()} Are:</b>\n\n"
+            bullet_number = 1
+            for weakness in weaknesses:
+                type_info = TYPE_INFO.get(weakness.lower())
+                if type_info:
+                    emoji = type_info.get('emoji')
+                    color = type_info.get('color')
+                    weakness_message += f"<b>{bullet_number}.{weakness}{emoji}</b>\n"
+                    bullet_number += 1
+
+            context.bot.send_photo(chat_id=update.effective_chat.id, photo=image_buffer, caption=weakness_message, parse_mode=ParseMode.HTML)
+        else:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="No weaknesses found for that Pokémon.")
+    else:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Pokémon not found.")
+
+def main():
+    updater = Updater(token=TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+
+    start_handler = CommandHandler('start', start)
+    dispatcher.add_handler(start_handler)
+
+    weaknesses_handler = CommandHandler('weakness', get_weaknesses)
+    dispatcher.add_handler(weaknesses_handler)
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
